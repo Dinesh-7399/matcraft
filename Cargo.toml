@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    # L0: Primitives & Standalone Formats
+    "crates/num-core",
+    "crates/tensor",
+    "crates/format-mat",
+    # L1: Language & Automatic Differentiation
+    "crates/autodiff",
+    "crates/lang-m",
+    # L2: Dual Compute Backends (CPU Reference Oracle & GPU Compute)
+    "crates/linalg-cpu",
+    "crates/compute-gpu",
+    # L3: Simulation Engine & Domain Toolboxes
+    "crates/sim-engine",
+    "crates/toolbox-control",
+    "crates/toolbox-signal",
+    "crates/toolbox-optim",
+    # L4: Visualization & 100% Offline Local AI
+    "crates/plot",
+    "crates/ai-local",
+    # L5: Unified Command & Session Engine
+    "crates/engine",
+    # L6: Thin UI & MCP Agent Surface
+    "crates/mcp",
+    "crates/ui-egui",
+    # L7: Executables & Architecture Enforcer
+    "apps/matcraft-cli",
+    "apps/matcraft",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["MatCraft Contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+dbg_macro = "deny"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+num-core = { path = "crates/num-core" }
+tensor = { path = "crates/tensor" }
+format-mat = { path = "crates/format-mat" }
+autodiff = { path = "crates/autodiff" }
+lang-m = { path = "crates/lang-m" }
+linalg-cpu = { path = "crates/linalg-cpu" }
+compute-gpu = { path = "crates/compute-gpu" }
+sim-engine = { path = "crates/sim-engine" }
+toolbox-control = { path = "crates/toolbox-control" }
+toolbox-signal = { path = "crates/toolbox-signal" }
+toolbox-optim = { path = "crates/toolbox-optim" }
+plot = { path = "crates/plot" }
+ai-local = { path = "crates/ai-local" }
+engine = { path = "crates/engine" }
+mcp = { path = "crates/mcp" }
+ui-egui = { path = "crates/ui-egui" }

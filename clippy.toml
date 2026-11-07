@@ -1,0 +1,6 @@
+disallowed-methods = [
+    { path = "std::option::Option::unwrap", reason = "Rule 1.1: Never panic in MatCraft; return Result or handle None." },
+    { path = "std::result::Result::unwrap", reason = "Rule 1.1: Never panic in MatCraft; propagate errors with `?`." },
+    { path = "std::option::Option::expect", reason = "Rule 1.1: Never panic in MatCraft; return structured EngineError." },
+    { path = "std::result::Result::expect", reason = "Rule 1.1: Never panic in MatCraft; return structured EngineError." },
+]

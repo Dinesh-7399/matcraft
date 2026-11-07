@@ -1,0 +1,18 @@
+[package]
+name = "ai-local"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+autodiff.workspace = true
+lang-m.workspace = true
+linalg-cpu.workspace = true
+num-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tensor.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "toolbox-signal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+linalg-cpu.workspace = true
+num-core.workspace = true
+tensor.workspace = true

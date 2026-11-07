@@ -1,0 +1,15 @@
+[package]
+name = "toolbox-optim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+autodiff.workspace = true
+linalg-cpu.workspace = true
+num-core.workspace = true
+tensor.workspace = true
+thiserror.workspace = true

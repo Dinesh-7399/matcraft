@@ -1,0 +1,16 @@
+# Build artifacts
+/target
+target/
+
+# Generated files
+*.log
+*.tmp
+*.bak
+
+# Editor / OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,15 @@
+[package]
+name = "lang-m"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+autodiff.workspace = true
+num-core.workspace = true
+serde.workspace = true
+tensor.workspace = true
+thiserror.workspace = true
