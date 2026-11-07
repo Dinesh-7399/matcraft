@@ -9,6 +9,9 @@
     clippy::unreachable
 )]
 
+pub mod canvas;
+pub use canvas::{BlockCanvas, CanvasBlock, CanvasBlockKind, CanvasPort, CanvasWire};
+
 use engine::{EngineCommand, EngineError, EngineOutput, Session, VarSummary};
 use num_core::MemoryBudget;
 use serde::{Deserialize, Serialize};

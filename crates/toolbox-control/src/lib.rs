@@ -10,9 +10,11 @@
 )]
 
 pub mod kalman_mpc;
+pub mod nonlinear_obs;
 pub mod robust;
 pub mod root_locus;
 pub use kalman_mpc::{acker_pole_placement, KalmanFilter, MpcController};
+pub use nonlinear_obs::ExtendedKalmanFilter;
 pub use robust::{disk_margin, h_infinity_bound, mu_upper_bound};
 pub use root_locus::{poly_roots, pzmap, rlocus, PoleZeroMap, RootLocusBranchPoint, RootLocusResult};
 

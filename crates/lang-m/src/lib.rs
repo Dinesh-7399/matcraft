@@ -11,11 +11,15 @@
 
 pub mod bytecode;
 pub mod hir;
+pub mod oop;
 pub mod symbolic;
 pub mod type_checker;
 
 pub use bytecode::{CompiledBytecode, OpCode};
 pub use hir::{infer_program_units, StaticDiagnostic};
+pub use oop::{
+    parse_classdef, AccessModifier, ClassDef, ClassInstance, ClassRegistry, MethodDef, PropertyDef,
+};
 pub use symbolic::SymExpr;
 pub use type_checker::{infer_expr, type_check_program, MType, TypeEnv, TypeWarning};
 

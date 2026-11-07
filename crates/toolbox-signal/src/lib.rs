@@ -9,8 +9,10 @@
     clippy::unreachable
 )]
 
+pub mod multirate;
 pub mod spectral;
 pub mod wavelets;
+pub use multirate::{decimate, downsample, resample, upsample};
 pub use spectral::{hilbert_analytic, interp1_cubic_spline, spectrogram_stft, xcorr};
 pub use wavelets::{dwt_1d, idwt_1d, wavedec, DB4_HI, DB4_LO};
 

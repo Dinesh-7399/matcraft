@@ -12,11 +12,16 @@
 pub mod acausal;
 pub mod codegen;
 pub mod dae_index;
+pub mod events;
 pub mod hybrid_automaton;
 pub mod solvers;
 pub mod stateflow;
 
 pub use dae_index::{analyze_dae_structure, PantelidesReport};
+pub use events::{
+    find_zero_crossing_time, simulate_with_events, EventResetAction, HybridSimTrace,
+    ZeroCrossingDirection, ZeroCrossingSpec,
+};
 pub use hybrid_automaton::{HybridAutomaton, HybridGuard, HybridMode};
 pub use stateflow::{StateChart, StateNode, StateTransition, TransitionGuard};
 
@@ -49,6 +54,8 @@ pub enum SimError {
     AlgebraicLoopDiverged(usize),
     #[error("Singular nodal matrix in acausal physical network")]
     SingularAcausalNetwork,
+    #[error("Event root-finding failed: {0}")]
+    EventRootFindingFailed(String),
     #[error("Unit error: {0}")]
     Unit(#[from] UnitError),
 }

@@ -281,6 +281,7 @@ dependencies = [
 name = "toolbox-control"
 version = "0.1.0"
 dependencies = [
+ "autodiff",
  "linalg-cpu",
  "num-core",
  "serde",
@@ -317,6 +318,7 @@ dependencies = [
  "num-core",
  "serde",
  "serde_json",
+ "sim-engine",
  "tensor",
  "thiserror",
 ]

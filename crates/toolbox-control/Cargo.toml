@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+autodiff.workspace = true
 linalg-cpu.workspace = true
 num-core.workspace = true
 serde.workspace = true
