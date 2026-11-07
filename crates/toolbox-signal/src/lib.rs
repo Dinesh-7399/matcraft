@@ -19,6 +19,18 @@ pub use wavelets::{dwt_1d, idwt_1d, wavedec, DB4_HI, DB4_LO};
 use linalg_cpu::fft_1d;
 use num_core::Complex64;
 use std::f64::consts::PI;
+use thiserror::Error;
+
+/// Error type for signal processing toolbox operations.
+#[derive(Clone, Debug, PartialEq, Error)]
+pub enum SignalError {
+    #[error("Signal cannot be empty for this operation")]
+    EmptySignal,
+    #[error("Invalid parameter `{param}`: {reason}")]
+    InvalidParam { param: &'static str, reason: String },
+    #[error("Resampling factor cannot be zero")]
+    InvalidSampleRate,
+}
 
 /// Designs a normalized Hamming-windowed low-pass FIR filter (`fir1(order, cutoff_norm)`).
 #[must_use]

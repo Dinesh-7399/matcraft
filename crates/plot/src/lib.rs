@@ -20,12 +20,16 @@ pub use root_locus_plot::{render_root_locus_svg, LocusPlotData};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
+use thiserror::Error;
+
 /// Error type for plot operations.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Error)]
 pub enum PlotError {
     /// No data provided to render.
+    #[error("No data provided to render")]
     EmptyData,
     /// Generic rendering failure.
+    #[error("Rendering failure: {0}")]
     RenderError(String),
 }
 

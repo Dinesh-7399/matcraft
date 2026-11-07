@@ -50,6 +50,10 @@ pub enum EngineError {
     Format(#[from] FormatError),
     #[error("Local AI error: {0}")]
     Ai(#[from] AiLocalError),
+    #[error("Plot error: {0}")]
+    Plot(#[from] plot::PlotError),
+    #[error("Signal toolbox error: {0}")]
+    Signal(#[from] toolbox_signal::SignalError),
     #[error("Nothing to undo in workspace history")]
     EmptyUndoStack,
     #[error("Nothing to redo in workspace history")]

@@ -11,3 +11,4 @@ workspace = true
 linalg-cpu.workspace = true
 num-core.workspace = true
 tensor.workspace = true
+thiserror.workspace = true

@@ -151,6 +151,7 @@ dependencies = [
  "num-core",
  "serde",
  "tensor",
+ "thiserror",
 ]
 
 [[package]]
@@ -308,6 +309,7 @@ dependencies = [
  "linalg-cpu",
  "num-core",
  "tensor",
+ "thiserror",
 ]
 
 [[package]]

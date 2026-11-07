@@ -11,3 +11,4 @@ workspace = true
 num-core.workspace = true
 serde.workspace = true
 tensor.workspace = true
+thiserror.workspace = true
