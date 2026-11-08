@@ -25,8 +25,15 @@ pub fn pcg_sparse(
         return Ok(x);
     }
 
-    let mut p = r.clone();
-    let mut rz_old = vec_dot(&r, &r);
+    let diag = a.diagonal();
+    let m_inv: Vec<f64> = diag
+        .iter()
+        .map(|&d| if d.abs() > 1e-15 { 1.0 / d } else { 1.0 })
+        .collect();
+
+    let mut z: Vec<f64> = r.iter().zip(&m_inv).map(|(&ri, &mi)| ri * mi).collect();
+    let mut p = z.clone();
+    let mut rz_old = vec_dot(&r, &z);
 
     for _iter in 0..max_iter {
         let ap = a.spmv(&p)?;
@@ -44,10 +51,13 @@ pub fn pcg_sparse(
         if vec_norm(&r) / b_norm <= tol {
             return Ok(x);
         }
-        let rz_new = vec_dot(&r, &r);
+        for (zi, (&ri, &mi)) in z.iter_mut().zip(r.iter().zip(&m_inv)) {
+            *zi = ri * mi;
+        }
+        let rz_new = vec_dot(&r, &z);
         let beta = rz_new / rz_old.max(1e-30);
-        for (pi, &ri) in p.iter_mut().zip(&r) {
-            *pi = ri + beta * (*pi);
+        for (pi, &zi) in p.iter_mut().zip(&z) {
+            *pi = zi + beta * (*pi);
         }
         rz_old = rz_new;
     }

@@ -167,6 +167,12 @@ where
         h = (h * factor).min(opts.max_step).max(1e-13);
     }
 
+    if t < tf - 1e-14 {
+        return Err(SimError::ConvergenceFailed(
+            "ode45 exceeded maximum step count of 200,000".into(),
+        ));
+    }
+
     Ok(OdeSolution {
         t: t_hist,
         y: y_hist,
@@ -186,7 +192,7 @@ where
     F: Fn(f64, &[Dual64]) -> Vec<Dual64>,
 {
     let [t0, tf] = t_span;
-    if dt <= 0.0 || tf <= t0 {
+    if !t0.is_finite() || !tf.is_finite() || !dt.is_finite() || dt <= 0.0 || tf <= t0 {
         return Err(SimError::InvalidTime("Invalid time parameters for ode15s".into()));
     }
     let budget = MemoryBudget::default_budget();
@@ -196,7 +202,15 @@ where
     let mut t_hist = vec![t];
     let mut y_hist = vec![y.clone()];
 
+    let mut step_count = 0usize;
+    const MAX_STEPS: usize = 200_000;
     while t < tf - 1e-14 {
+        if step_count >= MAX_STEPS {
+            return Err(SimError::ConvergenceFailed(format!(
+                "ode15s exceeded maximum step count of {MAX_STEPS}"
+            )));
+        }
+        step_count = step_count.saturating_add(1);
         let h = dt.min(tf - t);
         let t_next = t + h;
         let mut y_guess = y.clone();

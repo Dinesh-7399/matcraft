@@ -111,14 +111,15 @@ fn infer_expr_unit(expr: &Expr, env: &BTreeMap<String, SiUnit>) -> Result<SiUnit
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Interpreter, NoopExternalProvider};
+    use crate::{Interpreter, LangError, NoopExternalProvider};
     use num_core::MemoryBudget;
+    use std::sync::Arc;
 
     #[test]
     fn test_user_functions_multi_return_end_slicing_and_hir_inference(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let budget = MemoryBudget::default_budget();
-        let mut interp = Interpreter::new(budget);
+        let mut interp = Interpreter::new(Arc::clone(&budget));
         let mut ext = NoopExternalProvider;
 
         // 1. Multi-output user function + anonymous handle + `end` indexing + colon slicing
@@ -147,6 +148,59 @@ mod tests {
         let (units, diags) = infer_program_units("d = 100_m; t = 5_s; v = d / t; bad = d + t;");
         assert_eq!(units.get("v"), Some(&SiUnit::parse("m/s")?));
         assert_eq!(diags.len(), 1);
+
+        // 3. Test recursion limit protection prevents thread stack overflow crash
+        let rec_script = r#"
+            function y = rec_crash(x)
+                y = rec_crash(x);
+            end
+            res = rec_crash(1);
+        "#;
+        let mut rec_interp = Interpreter::new(Arc::clone(&budget));
+        let rec_res = rec_interp.eval_script(rec_script, &mut ext);
+        assert!(matches!(rec_res, Err(LangError::RecursionLimitExceeded { .. })));
+
+        // 4. Test unit lexing with subtraction and arithmetic: 10_m - 2_m
+        let unit_arith = "diff = 10_m - 2_m; prod = 5_m * 3_s;";
+        let mut u_interp = Interpreter::new(Arc::clone(&budget));
+        u_interp.eval_script(unit_arith, &mut ext)?;
+        assert_eq!(u_interp.vars.get("diff").map(|t| t.get(0, 0).unwrap_or(0.0)), Some(8.0));
+        assert_eq!(u_interp.vars.get("prod").map(|t| t.get(0, 0).unwrap_or(0.0)), Some(15.0));
+
+        // 5. Test multi-element indexed assignment: A(1:2, 1:2) = [10, 20; 30, 40]
+        let slice_assign = r#"
+            A = [1, 2; 3, 4];
+            A(1:2, 1:2) = [10, 20; 30, 40];
+        "#;
+        let mut sa_interp = Interpreter::new(Arc::clone(&budget));
+        sa_interp.eval_script(slice_assign, &mut ext)?;
+        let a_mat = sa_interp.vars.get("A").ok_or("Missing A")?;
+        assert_eq!(a_mat.get(0, 0)?, 10.0);
+        assert_eq!(a_mat.get(0, 1)?, 20.0);
+        assert_eq!(a_mat.get(1, 0)?, 30.0);
+        assert_eq!(a_mat.get(1, 1)?, 40.0);
+
+        // 6. Test matrix power (^) vs element-wise power (.^)
+        let pow_script = r#"
+            M = [1, 2; 3, 4];
+            M_pow2 = M^2;
+            M_epow2 = M.^2;
+        "#;
+        let mut pow_interp = Interpreter::new(Arc::clone(&budget));
+        pow_interp.eval_script(pow_script, &mut ext)?;
+        let m_pow2 = pow_interp.vars.get("M_pow2").ok_or("Missing M_pow2")?;
+        let m_epow2 = pow_interp.vars.get("M_epow2").ok_or("Missing M_epow2")?;
+        // M^2 = [1, 2; 3, 4] * [1, 2; 3, 4] = [7, 10; 15, 22]
+        assert_eq!(m_pow2.get(0, 0)?, 7.0);
+        assert_eq!(m_pow2.get(0, 1)?, 10.0);
+        assert_eq!(m_pow2.get(1, 0)?, 15.0);
+        assert_eq!(m_pow2.get(1, 1)?, 22.0);
+        // M.^2 = [1, 4; 9, 16]
+        assert_eq!(m_epow2.get(0, 0)?, 1.0);
+        assert_eq!(m_epow2.get(0, 1)?, 4.0);
+        assert_eq!(m_epow2.get(1, 0)?, 9.0);
+        assert_eq!(m_epow2.get(1, 1)?, 16.0);
+
         Ok(())
     }
 }

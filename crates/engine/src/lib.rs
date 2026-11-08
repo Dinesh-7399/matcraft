@@ -362,7 +362,10 @@ impl Session {
     }
 
     fn push_undo(&mut self) {
-        if self.undo_stack.len() >= self.max_undo_depth {
+        if self.max_undo_depth == 0 {
+            return;
+        }
+        if self.undo_stack.len() >= self.max_undo_depth && !self.undo_stack.is_empty() {
             let _ = self.undo_stack.drain(0..1);
         }
         self.undo_stack.push(self.workspace.clone());

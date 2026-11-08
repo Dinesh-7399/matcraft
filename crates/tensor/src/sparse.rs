@@ -91,6 +91,42 @@ impl SparseCsc<f64> {
         self.values.len()
     }
 
+    #[must_use]
+    pub fn col_ptrs(&self) -> &[usize] {
+        &self.col_ptrs
+    }
+
+    #[must_use]
+    pub fn row_indices(&self) -> &[usize] {
+        &self.row_indices
+    }
+
+    #[must_use]
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    #[must_use]
+    pub fn diagonal(&self) -> Vec<f64> {
+        let n = self.rows.min(self.cols);
+        let mut diag = vec![0.0; n];
+        for c in 0..n {
+            let start = self.col_ptrs.get(c).copied().unwrap_or(0);
+            let end = self.col_ptrs.get(c.saturating_add(1)).copied().unwrap_or(0);
+            for idx in start..end {
+                if let (Some(&r), Some(&val)) = (self.row_indices.get(idx), self.values.get(idx)) {
+                    if r == c {
+                        if let Some(slot) = diag.get_mut(c) {
+                            *slot = val;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        diag
+    }
+
     /// Sparse Matrix-Vector Multiplication (`y = A * x`).
     pub fn spmv(&self, x: &[f64]) -> Result<Vec<f64>, TensorError> {
         if x.len() != self.cols {

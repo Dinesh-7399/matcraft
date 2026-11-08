@@ -160,13 +160,18 @@ impl ClassRegistry {
 
         // Initialize properties from superclasses first, then this class
         let superclasses = def.superclasses.clone();
+        let mut visited_sups = std::collections::BTreeSet::new();
+        visited_sups.insert(class_name.to_string());
+
         for sup in &superclasses {
-            if let Some(sup_def) = self.classes.get(sup) {
-                for (prop_name, pdef) in &sup_def.properties {
-                    let val = pdef.default_val.unwrap_or(0.0);
-                    let t = Tensor::scalar(val, SiUnit::DIMENSIONLESS, budget)
-                        .map_err(LangError::Tensor)?;
-                    instance.properties.insert(prop_name.clone(), t);
+            if visited_sups.insert(sup.clone()) {
+                if let Some(sup_def) = self.classes.get(sup) {
+                    for (prop_name, pdef) in &sup_def.properties {
+                        let val = pdef.default_val.unwrap_or(0.0);
+                        let t = Tensor::scalar(val, SiUnit::DIMENSIONLESS, budget)
+                            .map_err(LangError::Tensor)?;
+                        instance.properties.insert(prop_name.clone(), t);
+                    }
                 }
             }
         }
@@ -181,15 +186,28 @@ impl ClassRegistry {
         Ok(instance)
     }
 
-    /// Resolves a method along the inheritance hierarchy.
+    /// Resolves a method along the inheritance hierarchy with cycle detection.
     #[must_use]
     pub fn resolve_method(&self, class_name: &str, method_name: &str) -> Option<&MethodDef> {
+        let mut visited = std::collections::BTreeSet::new();
+        self.resolve_method_inner(class_name, method_name, &mut visited)
+    }
+
+    fn resolve_method_inner<'a>(
+        &'a self,
+        class_name: &str,
+        method_name: &str,
+        visited: &mut std::collections::BTreeSet<String>,
+    ) -> Option<&'a MethodDef> {
+        if !visited.insert(class_name.to_string()) {
+            return None; // Cycle prevented!
+        }
         if let Some(def) = self.classes.get(class_name) {
             if let Some(m) = def.methods.get(method_name) {
                 return Some(m);
             }
             for sup in &def.superclasses {
-                if let Some(m) = self.resolve_method(sup, method_name) {
+                if let Some(m) = self.resolve_method_inner(sup, method_name, visited) {
                     return Some(m);
                 }
             }

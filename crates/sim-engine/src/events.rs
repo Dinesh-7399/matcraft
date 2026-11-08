@@ -154,7 +154,7 @@ where
     F: Fn(f64, &[f64]) -> Vec<f64>,
     G: Fn(f64, &[f64], usize) -> f64,
 {
-    if t_end <= 0.0 || dt <= 0.0 {
+    if !t_end.is_finite() || !dt.is_finite() || t_end <= 0.0 || dt <= 0.0 {
         return Err(SimError::InvalidTime(format!(
             "Invalid t_end={t_end} or dt={dt}"
         )));
@@ -206,7 +206,15 @@ where
         x_next
     };
 
+    let mut step_count = 0usize;
+    const MAX_SIM_STEPS: usize = 1_000_000;
     while t < t_end {
+        if step_count >= MAX_SIM_STEPS {
+            return Err(SimError::ConvergenceFailed(format!(
+                "Simulation exceeded maximum step count of {MAX_SIM_STEPS}"
+            )));
+        }
+        step_count = step_count.saturating_add(1);
         let h = dt.min(t_end - t);
         let x_trial = rk4_step(t, &x, h);
         let t_trial = t + h;

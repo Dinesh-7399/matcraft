@@ -565,6 +565,11 @@ pub fn svd(
 ) -> Result<(Tensor<f64>, Tensor<f64>, Tensor<f64>), LinalgError> {
     let m = a.rows();
     let n = a.cols();
+    if m < n {
+        let a_t = a.transpose()?;
+        let (u_t, s_t, v_t) = svd(&a_t, budget)?;
+        return Ok((v_t, s_t, u_t));
+    }
     let mut u_work = a.clone();
     let mut v = Tensor::eye(n, budget)?;
 
@@ -894,6 +899,21 @@ mod tests {
         let ap = matmul(&rect, &p, &budget)?;
         let apa = matmul(&ap, &rect, &budget)?;
         assert!((apa.get(2, 1)? - 6.0).abs() < 1e-9);
+
+        // 4. Wide matrix SVD (m < n): 2 x 3
+        let wide = Tensor::from_column_major(
+            2,
+            3,
+            vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0],
+            SiUnit::DIMENSIONLESS,
+            &budget,
+        )?;
+        let (u, s, v) = svd(&wide, &budget)?;
+        let us = matmul(&u, &s, &budget)?;
+        let usvt = matmul(&us, &v.transpose()?, &budget)?;
+        assert!((usvt.get(0, 0)? - 1.0).abs() < 1e-8);
+        assert!((usvt.get(1, 2)? - 6.0).abs() < 1e-8);
+
         Ok(())
     }
 }

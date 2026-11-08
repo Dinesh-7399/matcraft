@@ -33,6 +33,23 @@ pub enum PlotError {
     RenderError(String),
 }
 
+/// Escapes special XML characters to prevent SVG XML injection / malformed SVG documents.
+#[must_use]
+pub fn escape_xml(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Largest-Triangle-Three-Buckets (LTTB) downsampling algorithm for high-performance plotting.
 /// Reduces `x` and `y` series of size $N$ down to `threshold` points while preserving visual extrema.
 #[must_use]
@@ -177,7 +194,7 @@ impl SurfaceMesh3D {
              <rect width=\"100%\" height=\"100%\" fill=\"#11161d\"/>\n\
              <text x=\"{}\" y=\"24\" fill=\"#e6edf3\" font-family=\"monospace\" font-size=\"14\" text-anchor=\"middle\">{}</text>\n",
             w * 0.5,
-            self.title
+            escape_xml(&self.title)
         );
 
         // Render surface quads back-to-front
@@ -281,7 +298,7 @@ impl BodePlot {
              <rect width=\"100%\" height=\"100%\" fill=\"#11161d\"/>\n\
              <text x=\"{}\" y=\"22\" fill=\"#e6edf3\" font-family=\"monospace\" font-size=\"14\" text-anchor=\"middle\">{} - Bode Diagram</text>\n",
             w * 0.5,
-            self.title
+            escape_xml(&self.title)
         );
 
         // Subplot 1: Magnitude (dB)
@@ -399,7 +416,7 @@ impl FigureScene {
         svg.push_str(&format!(
             "  <text x=\"{}\" y=\"24\" fill=\"#e6edf3\" font-family=\"monospace\" font-size=\"14\" text-anchor=\"middle\">{}</text>\n",
             w * 0.5,
-            self.title
+            escape_xml(&self.title)
         ));
 
         for s in &self.series {

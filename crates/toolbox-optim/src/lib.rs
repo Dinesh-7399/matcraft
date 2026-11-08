@@ -53,8 +53,13 @@ where
     if n == 0 {
         return Err(OptimError::InvalidDimension);
     }
+    let budget = MemoryBudget::default_budget();
     for _iter in 0..max_iter {
         let (fx, jac) = jacobian_forward(&x, &system)?;
+        let m = fx.len();
+        if m != n {
+            return Err(OptimError::InvalidDimension);
+        }
         let res_norm: f64 = fx.iter().map(|v| v * v).sum::<f64>().sqrt();
         if res_norm <= tol {
             return Ok(x);
@@ -68,16 +73,12 @@ where
                 }
             }
         } else {
+            let j_mat = Tensor::from_column_major(n, n, jac, SiUnit::DIMENSIONLESS, &budget)?;
+            let f_mat = Tensor::from_column_major(n, 1, fx, SiUnit::DIMENSIONLESS, &budget)?;
+            let step = mldivide(&j_mat, &f_mat, &budget)?;
             for i in 0..n {
-                let diag = jac
-                    .get(i.saturating_mul(n).saturating_add(i))
-                    .copied()
-                    .unwrap_or(1.0);
-                let fi = fx.get(i).copied().unwrap_or(0.0);
-                if diag.abs() > 1e-14 {
-                    if let Some(slot) = x.get_mut(i) {
-                        *slot -= 0.5 * (fi / diag);
-                    }
+                if let (Some(slot), Ok(delta)) = (x.get_mut(i), step.get(i, 0)) {
+                    *slot -= delta;
                 }
             }
         }
@@ -401,6 +402,22 @@ mod tests {
         let fit = lsqnonlin(&[0.5, 0.5], 1e-6, 50, &budget, res_fn)?;
         assert!((fit.first().copied().unwrap_or(0.0) - 2.0).abs() < 1e-4);
         assert!((fit.get(1).copied().unwrap_or(0.0) - 1.0).abs() < 1e-4);
+
+        // Test fsolve_autodiff on coupled 2D system:
+        // f1(x, y) = x^2 + y - 5 = 0
+        // f2(x, y) = x + y^2 - 3 = 0
+        // Root at (2, 1)
+        let coupled_sys = |vars: &[Dual64]| -> Vec<Dual64> {
+            let x = vars.first().copied().unwrap_or_default();
+            let y = vars.get(1).copied().unwrap_or_default();
+            vec![
+                x.powi(2) + y - Dual64::constant(5.0),
+                x + y.powi(2) - Dual64::constant(3.0),
+            ]
+        };
+        let sol = fsolve_autodiff(&[1.5, 0.5], 1e-8, 20, coupled_sys)?;
+        assert!((sol.first().copied().unwrap_or(0.0) - 2.0).abs() < 1e-6);
+        assert!((sol.get(1).copied().unwrap_or(0.0) - 1.0).abs() < 1e-6);
 
         Ok(())
     }

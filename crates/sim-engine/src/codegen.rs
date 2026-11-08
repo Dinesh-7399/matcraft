@@ -75,7 +75,7 @@ pub fn generate_c_code(model: &SimModel) -> String {
                 code.push_str(&format!("    double out_{id} = s->state_integrator_{id};\n"));
             }
             BlockKind::TransferFcn { b0, b1, .. } => {
-                code.push_str(&format!("    double out_{id} = {b1:.8e} * s->state_tf_{id}[0] + {b0:.8e} * s->state_tf_{id}[1];\n"));
+                code.push_str(&format!("    double out_{id} = {b0:.8e} * s->state_tf_{id}[0] + {b1:.8e} * s->state_tf_{id}[1];\n"));
             }
             BlockKind::Gain { gain } => {
                 let u_expr = get_c_input_expr(model, id, 0);
@@ -230,14 +230,30 @@ pub fn generate_no_std_rust_code(model: &SimModel) -> String {
     code
 }
 
+fn sanitize_c_ident(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("s_{out}")
+    } else {
+        out
+    }
+}
+
 /// Generates a static-memory C finite state machine stepper for a `StateChart`.
 #[must_use]
 pub fn generate_stateflow_c_code(chart: &StateChart) -> String {
     let mut code = String::from("/* Auto-generated Stateflow C Stepper */\n#include <stdint.h>\n\n");
 
-    let state_names: Vec<&str> = chart.states.keys().map(String::as_str).collect();
+    let state_names: Vec<String> = chart.states.keys().map(|k| sanitize_c_ident(k)).collect();
     code.push_str("typedef enum {\n");
-    for &name in &state_names {
+    for name in &state_names {
         code.push_str(&format!("    STATE_{name},\n"));
     }
     code.push_str("} StateflowState;\n\n");
@@ -247,8 +263,9 @@ pub fn generate_stateflow_c_code(chart: &StateChart) -> String {
     code.push_str("    uint64_t ticks_in_state;\n");
     code.push_str("} StateflowFsm;\n\n");
 
+    let init_state = sanitize_c_ident(&chart.active_state);
     code.push_str("void stateflow_init(StateflowFsm* fsm) {\n");
-    code.push_str(&format!("    fsm->current_state = STATE_{};\n", chart.active_state));
+    code.push_str(&format!("    fsm->current_state = STATE_{init_state};\n"));
     code.push_str("    fsm->ticks_in_state = 0;\n}\n\n");
 
     code.push_str("void stateflow_step(StateflowFsm* fsm, double signal_val) {\n");
@@ -256,23 +273,25 @@ pub fn generate_stateflow_c_code(chart: &StateChart) -> String {
     code.push_str("    switch (fsm->current_state) {\n");
 
     for from_state in chart.states.keys() {
-        code.push_str(&format!("    case STATE_{from_state}:\n"));
+        let from_clean = sanitize_c_ident(from_state);
+        code.push_str(&format!("    case STATE_{from_clean}:\n"));
         for tr in &chart.transitions {
             if tr.from_state == *from_state {
+                let to_clean = sanitize_c_ident(&tr.to_state);
                 match &tr.guard {
                     TransitionGuard::AfterTicks(t) => {
                         code.push_str(&format!("        if (fsm->ticks_in_state >= {t}) {{\n"));
-                        code.push_str(&format!("            fsm->current_state = STATE_{};\n", tr.to_state));
+                        code.push_str(&format!("            fsm->current_state = STATE_{to_clean};\n"));
                         code.push_str("            fsm->ticks_in_state = 0;\n            break;\n        }\n");
                     }
                     TransitionGuard::InputGreaterThan { threshold, .. } => {
                         code.push_str(&format!("        if (signal_val > {threshold:.8e}) {{\n"));
-                        code.push_str(&format!("            fsm->current_state = STATE_{};\n", tr.to_state));
+                        code.push_str(&format!("            fsm->current_state = STATE_{to_clean};\n"));
                         code.push_str("            fsm->ticks_in_state = 0;\n            break;\n        }\n");
                     }
                     TransitionGuard::InputLessThan { threshold, .. } => {
                         code.push_str(&format!("        if (signal_val < {threshold:.8e}) {{\n"));
-                        code.push_str(&format!("            fsm->current_state = STATE_{};\n", tr.to_state));
+                        code.push_str(&format!("            fsm->current_state = STATE_{to_clean};\n"));
                         code.push_str("            fsm->ticks_in_state = 0;\n            break;\n        }\n");
                     }
                     _ => {}

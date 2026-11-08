@@ -515,9 +515,6 @@ impl<T: Clone + Copy + PartialEq> Tensor<T> {
         let out_rows = row_indices.len();
         let out_cols = col_indices.len();
         let count = MemoryBudget::checked_element_count(&[out_rows, out_cols])?;
-        let _res = self
-            .budget
-            .try_reserve_elements(count, std::mem::size_of::<T>())?;
         let mut out = Vec::with_capacity(count);
         for &c in col_indices {
             for &r in row_indices {
@@ -608,7 +605,6 @@ impl Tensor<f64> {
         if n == 1 {
             return Self::from_column_major(1, 1, vec![stop], unit, budget);
         }
-        let _res = budget.try_reserve_elements(n, std::mem::size_of::<f64>())?;
         let step = (stop - start) / ((n - 1) as f64);
         let data: Vec<f64> = (0..n).map(|i| start + (i as f64) * step).collect();
         Self::from_column_major(1, n, data, unit, budget)

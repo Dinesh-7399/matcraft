@@ -132,8 +132,9 @@ pub fn render_svg_animation(
     );
 
     // Title
+    let escaped_title = crate::escape_xml(title);
     svg.push_str(&format!(
-        "  <text x=\"{cx}\" y=\"24\" fill=\"#e6edf3\" font-family=\"monospace\" font-size=\"14\" text-anchor=\"middle\">{title}</text>\n",
+        "  <text x=\"{cx}\" y=\"24\" fill=\"#e6edf3\" font-family=\"monospace\" font-size=\"14\" text-anchor=\"middle\">{escaped_title}</text>\n",
         cx = w * 0.5,
     ));
 

@@ -56,6 +56,8 @@ pub enum SimError {
     SingularAcausalNetwork,
     #[error("Event root-finding failed: {0}")]
     EventRootFindingFailed(String),
+    #[error("Simulation solver convergence failed: {0}")]
+    ConvergenceFailed(String),
     #[error("Unit error: {0}")]
     Unit(#[from] UnitError),
 }
@@ -194,6 +196,14 @@ impl SimModel {
             return Err(SimError::InvalidTime("Step size dt must be > 0".into()));
         }
 
+        let max_steps: usize = 1_000_000;
+        let num_steps_est = (duration_sec / dt_sec).ceil();
+        if !num_steps_est.is_finite() || num_steps_est > max_steps as f64 {
+            return Err(SimError::InvalidTime(format!(
+                "Requested simulation steps ({num_steps_est}) exceeds maximum allowed ({max_steps})"
+            )));
+        }
+
         let mut states: BTreeMap<usize, [f64; 2]> = BTreeMap::new();
         for (&id, blk) in &self.blocks {
             match blk.kind {
@@ -216,7 +226,14 @@ impl SimModel {
         let mut t = SimTime(0);
         let h = dt.to_seconds();
 
+        let mut step_count = 0usize;
         while t <= t_end {
+            if step_count >= max_steps {
+                return Err(SimError::ConvergenceFailed(format!(
+                    "Simulation exceeded maximum step count of {max_steps}"
+                )));
+            }
+            step_count = step_count.saturating_add(1);
             let t_sec = t.to_seconds();
             let outputs = self.eval_outputs(t_sec, &states);
             times_sec.push(t_sec);
@@ -287,7 +304,7 @@ impl SimModel {
                 }
                 BlockKind::TransferFcn { b0, b1, .. } => {
                     let x = states.get(&id).copied().unwrap_or([0.0, 0.0]);
-                    out.insert(id, b1 * x[0] + b0 * x[1]);
+                    out.insert(id, b0 * x[0] + b1 * x[1]);
                 }
                 _ => {}
             }

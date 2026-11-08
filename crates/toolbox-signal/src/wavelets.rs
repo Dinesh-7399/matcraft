@@ -36,20 +36,8 @@ pub const DB4_HI: [f64; 8] = [
     -0.010_597_401_784_997_278,
 ];
 
-/// Synthesis (reconstruction) low-pass filter = time-reversed DB4_HI
+/// Synthesis (reconstruction) low-pass filter = time-reversed DB4_LO
 pub const DB4_LO_SYNTH: [f64; 8] = [
-    -0.010_597_401_784_997_278,
-    -0.032_883_011_666_982_945,
-     0.030_841_381_835_986_965,
-     0.187_034_811_718_881_6,
-    -0.027_983_769_416_983_855,
-    -0.630_880_767_929_590_4,
-     0.714_846_570_552_541_7,
-    -0.230_377_813_308_896_7,
-];
-
-/// Synthesis (reconstruction) high-pass filter = time-reversed DB4_LO
-pub const DB4_HI_SYNTH: [f64; 8] = [
      0.230_377_813_308_896_7,
      0.714_846_570_552_541_7,
      0.630_880_767_929_590_4,
@@ -58,6 +46,18 @@ pub const DB4_HI_SYNTH: [f64; 8] = [
      0.030_841_381_835_986_965,
      0.032_883_011_666_982_945,
     -0.010_597_401_784_997_278,
+];
+
+/// Synthesis (reconstruction) high-pass filter = time-reversed DB4_HI
+pub const DB4_HI_SYNTH: [f64; 8] = [
+    -0.010_597_401_784_997_278,
+    -0.032_883_011_666_982_945,
+     0.030_841_381_835_986_965,
+     0.187_034_811_718_881_6,
+    -0.027_983_769_416_983_855,
+    -0.630_880_767_929_590_4,
+     0.714_846_570_552_541_7,
+    -0.230_377_813_308_896_7,
 ];
 
 /// Convolve signal with filter using periodic extension, then downsample by 2.
@@ -206,6 +206,9 @@ mod tests {
         let reconstructed = idwt_1d(&approx, &detail);
         // Reconstruction length should match original
         assert_eq!(reconstructed.len(), signal.len());
+        let orig_energy: f64 = signal.iter().map(|&x| x * x).sum();
+        let rec_energy: f64 = reconstructed.iter().map(|&x| x * x).sum();
+        assert!((orig_energy - rec_energy).abs() < 0.5);
     }
 
     #[test]

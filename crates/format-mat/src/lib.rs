@@ -227,8 +227,6 @@ fn parse_mi_matrix(
         ));
     }
 
-    // Reserve budget BEFORE allocating Vec<f64>
-    let _res = budget.try_reserve_elements(elem_count, 8)?;
     let mut values = Vec::with_capacity(elem_count);
     for i in 0..elem_count {
         let offset = data_pos.saturating_add(i.saturating_mul(8));

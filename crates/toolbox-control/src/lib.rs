@@ -18,7 +18,7 @@ pub use nonlinear_obs::ExtendedKalmanFilter;
 pub use robust::{disk_margin, h_infinity_bound, mu_upper_bound};
 pub use root_locus::{poly_roots, pzmap, rlocus, PoleZeroMap, RootLocusBranchPoint, RootLocusResult};
 
-use linalg_cpu::{eig_general, expm, inv, matmul, mldivide, rank, LinalgError};
+use linalg_cpu::{eig_general, expm, matmul, mldivide, rank, LinalgError};
 use num_core::{Complex64, MemoryBudget, SiUnit};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -97,22 +97,23 @@ impl StateSpace {
     }
 
     /// Exact Zero-Order Hold Discretization (`c2d(sys, Ts, 'zoh')`) using Matrix Exponential `expm`!
-    /// $A_d = e^{A T_s}$, $B_d = A^{-1} (A_d - I) B$ (or series expansion if $A$ is singular).
+    /// Computes $A_d = e^{A T_s}$ and $B_d = \int_0^{T_s} e^{A \tau} d\tau \cdot B$ simultaneously
+    /// via Van Loan's block matrix exponential theorem:
+    /// $\exp\left( \begin{bmatrix} A & B \\ 0 & 0 \end{bmatrix} T_s \right) = \begin{bmatrix} A_d & B_d \\ 0 & I \end{bmatrix}$.
     pub fn c2d_zoh(&self, ts_sec: f64, budget: &Arc<MemoryBudget>) -> Result<Self, LinalgError> {
         let n = self.a.rows();
-        let a_ts = self.a.map_unary(SiUnit::DIMENSIONLESS, |x| x * ts_sec)?;
-        let ad = expm(&a_ts, budget)?;
-        let eye = Tensor::eye(n, budget)?;
+        let m = self.b.cols();
+        let top = self.a.horzcat(&self.b)?;
+        let bot = Tensor::zeros(m, n + m, budget)?;
+        let block = top.vertcat(&bot)?;
+        let block_scaled = block.map_unary(SiUnit::DIMENSIONLESS, |x| x * ts_sec)?;
+        let exp_block = expm(&block_scaled, budget)?;
 
-        // Compute integral_0^Ts exp(A*tau) dtau = Ts * (I + A*Ts/2 + (A*Ts)^2/6 + (A*Ts)^3/24)
-        let a2 = matmul(&a_ts, &a_ts, budget)?;
-        let a3 = matmul(&a2, &a_ts, budget)?;
-        let int_mat = eye
-            .checked_add(&a_ts.map_unary(SiUnit::DIMENSIONLESS, |x| x * 0.5)?)?
-            .checked_add(&a2.map_unary(SiUnit::DIMENSIONLESS, |x| x / 6.0)?)?
-            .checked_add(&a3.map_unary(SiUnit::DIMENSIONLESS, |x| x / 24.0)?)?
-            .map_unary(SiUnit::DIMENSIONLESS, |x| x * ts_sec)?;
-        let bd = matmul(&int_mat, &self.b, budget)?;
+        let r_n: Vec<usize> = (0..n).collect();
+        let c_n: Vec<usize> = (0..n).collect();
+        let c_m: Vec<usize> = (n..n + m).collect();
+        let ad = exp_block.slice_by_indices(&r_n, &c_n)?;
+        let bd = exp_block.slice_by_indices(&r_n, &c_m)?;
 
         Ok(Self {
             a: ad,
@@ -211,7 +212,7 @@ impl StateSpace {
             mldivide(&r_plus, &matmul(&btp, ad, budget)?, budget)?
         } else {
             let r_inv_bt = mldivide(r, &self.b.transpose()?, budget)?;
-            matmul(&r_inv_bt, &p, budget)?.map_unary(SiUnit::DIMENSIONLESS, |x| x / dt)?
+            matmul(&r_inv_bt, &p, budget)?
         };
         Ok((k, p))
     }
@@ -222,18 +223,40 @@ impl StateSpace {
 
     pub fn eval_frf(&self, s: Complex64, budget: &Arc<MemoryBudget>) -> Result<f64, LinalgError> {
         let n = self.a.rows();
+        let m = self.b.cols();
         let eye = Tensor::eye(n, budget)?;
+        let sigma = s.re;
         let omega = s.im;
-        // Real block representation of (j*omega*I - A)
-        let a_neg = self.a.map_unary(SiUnit::DIMENSIONLESS, |x| -x)?;
-        let w_eye = eye.map_unary(SiUnit::DIMENSIONLESS, |x| x * omega)?;
-        let top = a_neg.horzcat(&w_eye.map_unary(SiUnit::DIMENSIONLESS, |x| -x)?)?;
-        let bot = w_eye.horzcat(&a_neg)?;
+        // Real block representation of (s*I - A) = (sigma*I - A) + j*(omega*I)
+        // [  X  -Y ] [ z_r ] = [ B ]
+        // [  Y   X ] [ z_i ]   [ 0 ]
+        let sig_eye = eye.map_unary(SiUnit::DIMENSIONLESS, |x| x * sigma)?;
+        let x_mat = sig_eye.checked_sub(&self.a)?;
+        let y_mat = eye.map_unary(SiUnit::DIMENSIONLESS, |x| x * omega)?;
+        let neg_y = y_mat.map_unary(SiUnit::DIMENSIONLESS, |x| -x)?;
+
+        let top = x_mat.horzcat(&neg_y)?;
+        let bot = y_mat.horzcat(&x_mat)?;
         let block_2n = top.vertcat(&bot)?;
-        let rhs_2n = self.b.vertcat(&Tensor::zeros(n, self.b.cols(), budget)?)?;
+        let rhs_2n = self.b.vertcat(&Tensor::zeros(n, m, budget)?)?;
         let sol_2n = mldivide(&block_2n, &rhs_2n, budget)?;
-        let _ = inv(&eye, budget)?;
-        sol_2n.norm_frobenius().map_err(LinalgError::from)
+
+        // Extract z_r and z_i:
+        let r_n: Vec<usize> = (0..n).collect();
+        let r_2n: Vec<usize> = (n..2 * n).collect();
+        let c_m: Vec<usize> = (0..m).collect();
+        let z_r = sol_2n.slice_by_indices(&r_n, &c_m)?;
+        let z_i = sol_2n.slice_by_indices(&r_2n, &c_m)?;
+
+        // Output: Y(s) = C * Z(s) + D
+        // Y_r = C * z_r + D
+        // Y_i = C * z_i
+        let y_r = matmul(&self.c, &z_r, budget)?.checked_add(&self.d)?;
+        let y_i = matmul(&self.c, &z_i, budget)?;
+
+        let norm_r = y_r.norm_frobenius()?;
+        let norm_i = y_i.norm_frobenius()?;
+        Ok((norm_r * norm_r + norm_i * norm_i).sqrt())
     }
 }
 

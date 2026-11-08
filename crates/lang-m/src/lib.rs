@@ -41,6 +41,8 @@ pub enum LangError {
     Tensor(#[from] TensorError),
     #[error("Execution fuel exhausted after {0} operations (possible infinite loop)")]
     FuelExhausted(u64),
+    #[error("Recursion limit exceeded ({limit} frames)")]
+    RecursionLimitExceeded { limit: usize },
     #[error("Builtin `{name}` error: {reason}")]
     BuiltinError { name: String, reason: String },
 }
@@ -274,15 +276,38 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, LangError> {
                 message: format!("Invalid float literal '{num_str}'"),
             })?;
 
-            let unit_suffix = if chars.get(i) == Some(&'_') {
+            let unit_suffix = if chars.get(i) == Some(&'_')
+                && chars.get(i.saturating_add(1)).is_some_and(char::is_ascii_alphabetic)
+            {
                 i = i.saturating_add(1);
                 let u_start = i;
-                while i < chars.len()
-                    && chars.get(i).is_some_and(|&c| {
-                        c.is_ascii_alphanumeric() || c == '/' || c == '*' || c == '^' || c == '-'
-                    })
-                {
-                    i = i.saturating_add(1);
+                while i < chars.len() {
+                    let c = chars.get(i).copied().unwrap_or('\0');
+                    if c.is_ascii_alphabetic() {
+                        i = i.saturating_add(1);
+                    } else if c == '^' {
+                        let next_c = chars.get(i.saturating_add(1)).copied();
+                        let next2_c = chars.get(i.saturating_add(2)).copied();
+                        if next_c.is_some_and(|ch| ch.is_ascii_digit()) {
+                            i = i.saturating_add(1);
+                            while i < chars.len() && chars.get(i).is_some_and(char::is_ascii_digit) {
+                                i = i.saturating_add(1);
+                            }
+                        } else if next_c == Some('-') && next2_c.is_some_and(|ch| ch.is_ascii_digit()) {
+                            i = i.saturating_add(2);
+                            while i < chars.len() && chars.get(i).is_some_and(char::is_ascii_digit) {
+                                i = i.saturating_add(1);
+                            }
+                        } else {
+                            break;
+                        }
+                    } else if (c == '*' || c == '/')
+                        && chars.get(i.saturating_add(1)).is_some_and(char::is_ascii_alphabetic)
+                    {
+                        i = i.saturating_add(1);
+                    } else {
+                        break;
+                    }
                 }
                 let u_str: String = chars.get(u_start..i).unwrap_or(&[]).iter().collect();
                 Some(u_str)
@@ -419,15 +444,19 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     inside_index_depth: usize,
+    parse_depth: usize,
 }
 
 impl Parser {
+    pub const MAX_PARSE_DEPTH: usize = 256;
+
     #[must_use]
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
             pos: 0,
             inside_index_depth: 0,
+            parse_depth: 0,
         }
     }
 
@@ -846,7 +875,15 @@ impl Parser {
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr, LangError> {
-        self.parse_logical_or()
+        if self.parse_depth >= Self::MAX_PARSE_DEPTH {
+            return Err(LangError::RecursionLimitExceeded {
+                limit: Self::MAX_PARSE_DEPTH,
+            });
+        }
+        self.parse_depth = self.parse_depth.saturating_add(1);
+        let res = self.parse_logical_or();
+        self.parse_depth = self.parse_depth.saturating_sub(1);
+        res
     }
 
     fn parse_logical_or(&mut self) -> Result<Expr, LangError> {
@@ -1152,11 +1189,13 @@ pub struct Interpreter {
     pub budget: Arc<MemoryBudget>,
     pub fuel_remaining: u64,
     pub max_fuel: u64,
+    pub call_depth: usize,
     active_end_len: Option<usize>,
 }
 
 impl Interpreter {
     pub const DEFAULT_FUEL: u64 = 500_000;
+    pub const MAX_CALL_DEPTH: usize = 32;
 
     #[must_use]
     pub fn new(budget: Arc<MemoryBudget>) -> Self {
@@ -1171,6 +1210,7 @@ impl Interpreter {
             budget,
             fuel_remaining: Self::DEFAULT_FUEL,
             max_fuel: Self::DEFAULT_FUEL,
+            call_depth: 0,
             active_end_len: None,
         }
     }
@@ -1239,6 +1279,7 @@ impl Interpreter {
                     self.vars.insert(target.clone(), handle_scalar.clone());
                     return Ok((Some(handle_scalar), FlowSignal::None));
                 }
+                self.anon_funcs.remove(target);
                 let val = self.eval_expr(expr, external)?;
                 self.vars.insert(target.clone(), val.clone());
                 Ok((Some(val), FlowSignal::None))
@@ -1251,6 +1292,9 @@ impl Interpreter {
                             .into(),
                     });
                 };
+                for t in targets {
+                    self.anon_funcs.remove(t);
+                }
                 let eval_args: Vec<Tensor<f64>> = args
                     .iter()
                     .map(|a| self.eval_expr(a, external))
@@ -1289,13 +1333,29 @@ impl Interpreter {
                         cols,
                         external,
                     )?;
+                    let needed = r_idx.len().saturating_mul(c_idx.len());
+                    if rhs.numel() != 1 && rhs.numel() != needed {
+                        return Err(LangError::Tensor(TensorError::ShapeMismatch {
+                            op: "indexed assignment",
+                            lhs: vec![r_idx.len(), c_idx.len()],
+                            rhs: rhs.shape().to_vec(),
+                        }));
+                    }
                     let mat = self
                         .vars
                         .get_mut(target)
                         .ok_or_else(|| LangError::UndefinedSymbol(target.clone()))?;
-                    for &c0 in &c_idx {
-                        for &r0 in &r_idx {
-                            mat.set(r0, c0, scalar_val)?;
+                    for (c_sub, &c0) in c_idx.iter().enumerate() {
+                        for (r_sub, &r0) in r_idx.iter().enumerate() {
+                            let val = if rhs.numel() == 1 {
+                                scalar_val
+                            } else if rhs.shape() == [r_idx.len(), c_idx.len()] {
+                                rhs.get(r_sub, c_sub)?
+                            } else {
+                                let lin = c_sub.saturating_mul(r_idx.len()).saturating_add(r_sub);
+                                rhs.get_linear(lin)?
+                            };
+                            mat.set(r0, c0, val)?;
                         }
                     }
                 } else if indices.len() == 1 {
@@ -1305,10 +1365,6 @@ impl Interpreter {
                     self.active_end_len = Some(numel);
                     let idx_tensor = self.eval_expr(first_expr, external)?;
                     self.active_end_len = None;
-                    let mat = self
-                        .vars
-                        .get_mut(target)
-                        .ok_or_else(|| LangError::UndefinedSymbol(target.clone()))?;
                     if idx_tensor.shape() == [rows, cols]
                         && idx_tensor
                             .to_column_major_vec()?
@@ -1316,15 +1372,50 @@ impl Interpreter {
                             .all(|&v| v == 0.0 || v == 1.0)
                     {
                         // Logical mask assignment `A(A < 0) = 0`
+                        let mask_count = idx_tensor
+                            .to_column_major_vec()?
+                            .iter()
+                            .filter(|&&v| v != 0.0)
+                            .count();
+                        if rhs.numel() != 1 && rhs.numel() != mask_count {
+                            return Err(LangError::Tensor(TensorError::ShapeMismatch {
+                                op: "logical mask assignment",
+                                lhs: vec![mask_count],
+                                rhs: vec![rhs.numel()],
+                            }));
+                        }
+                        let mat = self
+                            .vars
+                            .get_mut(target)
+                            .ok_or_else(|| LangError::UndefinedSymbol(target.clone()))?;
+                        let mut sub_i = 0usize;
                         for c in 0..cols {
                             for r in 0..rows {
                                 if idx_tensor.get(r, c)? != 0.0 {
-                                    mat.set(r, c, scalar_val)?;
+                                    let val = if rhs.numel() == 1 {
+                                        scalar_val
+                                    } else {
+                                        rhs.get_linear(sub_i)?
+                                    };
+                                    mat.set(r, c, val)?;
+                                    sub_i = sub_i.saturating_add(1);
                                 }
                             }
                         }
                     } else {
-                        for i in 0..idx_tensor.numel() {
+                        let total_indices = idx_tensor.numel();
+                        if rhs.numel() != 1 && rhs.numel() != total_indices {
+                            return Err(LangError::Tensor(TensorError::ShapeMismatch {
+                                op: "linear indexed assignment",
+                                lhs: vec![total_indices],
+                                rhs: vec![rhs.numel()],
+                            }));
+                        }
+                        let mat = self
+                            .vars
+                            .get_mut(target)
+                            .ok_or_else(|| LangError::UndefinedSymbol(target.clone()))?;
+                        for i in 0..total_indices {
                             let idx1 = idx_tensor.get_linear(i)? as usize;
                             if idx1 == 0 {
                                 return Err(LangError::Tensor(TensorError::IndexOutOfBounds {
@@ -1332,7 +1423,12 @@ impl Interpreter {
                                     shape: vec![rows, cols],
                                 }));
                             }
-                            mat.set_linear(idx1 - 1, scalar_val)?;
+                            let val = if rhs.numel() == 1 {
+                                scalar_val
+                            } else {
+                                rhs.get_linear(i)?
+                            };
+                            mat.set_linear(idx1 - 1, val)?;
                         }
                     }
                 }
@@ -1480,6 +1576,12 @@ impl Interpreter {
         args: &[Tensor<f64>],
         external: &mut P,
     ) -> Result<Vec<Tensor<f64>>, LangError> {
+        if self.call_depth >= Self::MAX_CALL_DEPTH {
+            return Err(LangError::RecursionLimitExceeded {
+                limit: Self::MAX_CALL_DEPTH,
+            });
+        }
+        self.call_depth = self.call_depth.saturating_add(1);
         let saved_vars = self.vars.clone();
         self.vars.clear();
         if let Ok(pi_t) = Tensor::scalar(std::f64::consts::PI, SiUnit::DIMENSIONLESS, &self.budget)
@@ -1489,23 +1591,36 @@ impl Interpreter {
         for (p_name, arg_val) in uf.params.iter().zip(args) {
             self.vars.insert(p_name.clone(), arg_val.clone());
         }
-        let _ = self.exec_block(&uf.body, external)?;
+        let block_res = self.exec_block(&uf.body, external);
         let mut results = Vec::with_capacity(uf.outputs.len().max(1));
-        if uf.outputs.is_empty() {
-            if let Some(ans) = self.vars.get("ans").cloned() {
-                results.push(ans);
+        let eval_err = match block_res {
+            Ok(_) => {
+                if uf.outputs.is_empty() {
+                    if let Some(ans) = self.vars.get("ans").cloned() {
+                        results.push(ans);
+                    }
+                    None
+                } else {
+                    let mut err = None;
+                    for out_name in &uf.outputs {
+                        match self.vars.get(out_name).cloned() {
+                            Some(val) => results.push(val),
+                            None => {
+                                err = Some(LangError::UndefinedSymbol(out_name.clone()));
+                                break;
+                            }
+                        }
+                    }
+                    err
+                }
             }
-        } else {
-            for out_name in &uf.outputs {
-                let val = self
-                    .vars
-                    .get(out_name)
-                    .cloned()
-                    .ok_or_else(|| LangError::UndefinedSymbol(out_name.clone()))?;
-                results.push(val);
-            }
-        }
+            Err(e) => Some(e),
+        };
         self.vars = saved_vars;
+        self.call_depth = self.call_depth.saturating_sub(1);
+        if let Some(e) = eval_err {
+            return Err(e);
+        }
         Ok(results)
     }
 
@@ -1613,11 +1728,50 @@ impl Interpreter {
                     BinOp::Sub => Ok(l.checked_sub(&r)?),
                     BinOp::ElemMul => Ok(l.elem_mul(&r)?),
                     BinOp::ElemDiv => Ok(l.elem_div(&r)?),
-                    BinOp::ElemPow | BinOp::Pow => {
+                    BinOp::ElemPow => {
                         r.unit().verify_dimensionless(".^")?;
                         let exp = r.get(0, 0)?;
                         let out_unit = l.unit().checked_pow(exp as i8)?;
                         Ok(l.map_unary(out_unit, |x| x.powf(exp))?)
+                    }
+                    BinOp::Pow => {
+                        r.unit().verify_dimensionless("^")?;
+                        let exp = r.get(0, 0)?;
+                        if l.is_scalar() {
+                            let out_unit = l.unit().checked_pow(exp as i8)?;
+                            Ok(l.map_unary(out_unit, |x| x.powf(exp))?)
+                        } else {
+                            if l.rows() != l.cols() {
+                                return Err(LangError::Tensor(TensorError::ShapeMismatch {
+                                    op: "^",
+                                    lhs: l.shape().to_vec(),
+                                    rhs: l.shape().to_vec(),
+                                }));
+                            }
+                            let k = exp.round() as i64;
+                            if (exp - (k as f64)).abs() > 1e-12 || k < 0 {
+                                return Err(LangError::Syntax {
+                                    pos: 0,
+                                    message: "Matrix power requires non-negative integer exponent".into(),
+                                });
+                            }
+                            if k == 0 {
+                                return Ok(Tensor::eye(l.rows(), &self.budget)?);
+                            }
+                            let mut acc = l.clone();
+                            for _ in 1..k {
+                                if let Some(mut res) =
+                                    external.call_external("matmul", &[acc.clone(), l.clone()], &self.budget)?
+                                {
+                                    if let Some(first) = res.pop() {
+                                        acc = first;
+                                        continue;
+                                    }
+                                }
+                                acc = matmul_fallback(&acc, &l, &self.budget)?;
+                            }
+                            Ok(acc)
+                        }
                     }
                     BinOp::MatMul => {
                         if l.is_scalar() || r.is_scalar() {
@@ -1667,6 +1821,12 @@ impl Interpreter {
             Expr::CallOrIndex { name, args } => {
                 // 1. Check anonymous function handles `@(x) ...`
                 if let Some((params, body_expr)) = self.anon_funcs.get(name).cloned() {
+                    if self.call_depth >= Self::MAX_CALL_DEPTH {
+                        return Err(LangError::RecursionLimitExceeded {
+                            limit: Self::MAX_CALL_DEPTH,
+                        });
+                    }
+                    self.call_depth = self.call_depth.saturating_add(1);
                     let eval_args: Vec<Tensor<f64>> = args
                         .iter()
                         .map(|a| self.eval_expr(a, external))
@@ -1677,6 +1837,7 @@ impl Interpreter {
                     }
                     let res = self.eval_expr(&body_expr, external);
                     self.vars = saved;
+                    self.call_depth = self.call_depth.saturating_sub(1);
                     return res;
                 }
 
